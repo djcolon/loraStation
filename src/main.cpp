@@ -30,8 +30,12 @@
 SSD1306Wire display(0x3c, 500000, SDA_OLED, SCL_OLED, GEOMETRY_128_64, RST_OLED);
 SX1262 radio = new Module(LoRa_nss, LoRa_dio1, LoRa_nrst, LoRa_busy);
 
+#define SCREEN_REFRESH_RATE_US 100000
+int64_t lastRefresh = 0;
 String lastPackage = "";
-int noReceiveCounter = 0;
+int64_t lastMessageTime = 0;
+float lastRssi = 0.0;
+float lastSnr = 0.0;
 
 void VextON(void)
 {
@@ -41,6 +45,23 @@ void VextON(void)
 void VextOFF(void) //Vext default OFF
 {
   digitalWrite(Vext, HIGH);
+}
+
+// Interrupt receive, see:
+// https://github.com/jgromes/RadioLib/blob/master/examples/SX126x/SX126x_Receive_Interrupt/SX126x_Receive_Interrupt.ino
+// flag to indicate that a packet was received
+volatile bool receivedFlag = false;
+
+// this function is called when a complete packet
+// is received by the module
+// IMPORTANT: this function MUST be 'void' type
+//            and MUST NOT have any arguments!
+#if defined(ESP8266) || defined(ESP32)
+  ICACHE_RAM_ATTR
+#endif
+void setFlag(void) {
+  // we got a packet, set the flag
+  receivedFlag = true;
 }
 
 void setup()
@@ -73,68 +94,61 @@ void setup()
     while (true)
       ;
   }
+
+  // set the function that will be called
+  // when new packet is received
+  radio.setPacketReceivedAction(setFlag);
+
+  // start listening for LoRa packets
+  Serial.print(F("[SX1262] Starting to listen ... "));
+  state = radio.startReceive();
 }
 
 void loop()
 {
-  Serial.print(F("[SX1262] Waiting for incoming transmission ... "));
+  if(receivedFlag) {
+    // reset flag
+    receivedFlag = false;
+    // Read data.
+    String str;
+    int state = radio.readData(str);
 
-  // you can receive data as an Arduino String
-  // NOTE: receive() is a blocking method!
-  //       See example ReceiveInterrupt for details
-  //       on non-blocking reception method.
-  String str;
-  int state = radio.receive(str);
-
-  // you can also receive data as byte array
-  /*
-    byte byteArr[8];
-    int state = radio.receive(byteArr, 8);
-  */
-
-  if (state == RADIOLIB_ERR_NONE)
-  {
-    // packet was successfully received
-    noReceiveCounter = 0;
-    lastPackage = str;
-    digitalWrite(LED, HIGH);
-    Serial.println(F("success!"));
-
-    // print the data of the packet
-    Serial.print(F("[SX1262] Data:\t\t"));
-    Serial.println(str);
-
-    // print the RSSI (Received Signal Strength Indicator)
-    // of the last received packet
-    Serial.print(F("[SX1262] RSSI:\t\t"));
-    Serial.print(radio.getRSSI());
-    Serial.println(F(" dBm"));
-
-    // print the SNR (Signal-to-Noise Ratio)
-    // of the last received packet
-    Serial.print(F("[SX1262] SNR:\t\t"));
-    Serial.print(radio.getSNR());
-    Serial.println(F(" dB"));
-    digitalWrite(LED, LOW);
+    if (state == RADIOLIB_ERR_NONE) {
+      // packet was successfully received
+      lastMessageTime =  esp_timer_get_time();
+      lastPackage = str;
+      lastRssi = radio.getRSSI();
+      lastSnr = radio.getSNR();
+      Serial.println(str);
+    }
+    else if (state == RADIOLIB_ERR_RX_TIMEOUT)
+    {
+      // timeout occurred while waiting for a packet
+      Serial.println(F("timeout!"));
+    }
+    else if (state == RADIOLIB_ERR_CRC_MISMATCH)
+    {
+      // packet was received, but is malformed
+      Serial.println(F("CRC error!"));
+    }
+    else
+    {
+      // some other error occurred
+      Serial.print(F("failed, code "));
+      Serial.println(state);
+    }
   }
-  else if (state == RADIOLIB_ERR_RX_TIMEOUT)
-  {
-    // timeout occurred while waiting for a packet
-    Serial.println(F("timeout!"));
-    noReceiveCounter++;
+  // Refresh the screen every now and then.
+  int64_t now = esp_timer_get_time();
+  if(now - lastRefresh > SCREEN_REFRESH_RATE_US) {
+    int timeSinceLast = (now - lastMessageTime) / 1000000;
+    display.clear();
+    display.drawString(0, 0, lastPackage);
+    display.drawString(0, 12, "Time since: " + String(timeSinceLast) + "s");
+    display.drawString(0, 24, "Last Rssi:  " + String(lastRssi) + "dBm");
+    display.drawString(0, 36, "Last SNR :  " + String(lastSnr) + "dB");
+    display.display();
+    lastRefresh = now;
   }
-  else if (state == RADIOLIB_ERR_CRC_MISMATCH)
-  {
-    // packet was received, but is malformed
-    Serial.println(F("CRC error!"));
-  }
-  else
-  {
-    // some other error occurred
-    Serial.print(F("failed, code "));
-    Serial.println(state);
-  }
-  display.clear();
-  display.drawString(0, 0, lastPackage + "(" + noReceiveCounter + ")");
-  display.display();
+
 }
