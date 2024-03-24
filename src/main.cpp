@@ -20,12 +20,16 @@
 #define LoRa_nrst 12
 #define LoRa_busy 13
 
-//#define VEXT 21
-//#define USERKEY 9
-//#define SDA_OLED 4
-//#define SCL_OLED 15
-//#define RST_OLED 16
-//#define LED      10
+// LoRa settings (match transmitter!)
+#define FREQUENCY 868.0
+#define BANDWIDTH 125 // Default 125
+#define SPREADING_FACTOR 10 // Default 9 - Higher -> longer range, slower transmit.
+// Coding rate data:total
+// 5: 4/5
+// 6: 4/6
+// 7: 5/7
+// 8: 4/8
+#define CODING_RATE 5 // Default 4/5 (5)
 
 SSD1306Wire display(0x3c, 500000, SDA_OLED, SCL_OLED, GEOMETRY_128_64, RST_OLED);
 SX1262 radio = new Module(LoRa_nss, LoRa_dio1, LoRa_nrst, LoRa_busy);
@@ -93,6 +97,30 @@ void setup()
     Serial.println(state);
     while (true)
       ;
+  }
+
+    // Radio settings.
+  if (radio.setFrequency(FREQUENCY) == RADIOLIB_ERR_INVALID_FREQUENCY) {
+    Serial.println(F("Selected frequency is invalid for this module!"));
+    while (true);
+  }
+
+  // Bandwidth.
+  if (radio.setBandwidth(BANDWIDTH) == RADIOLIB_ERR_INVALID_BANDWIDTH) {
+    Serial.println(F("Selected bandwidth is invalid for this module!"));
+    while (true);
+  }
+
+  // Spreading factor.
+  if (radio.setSpreadingFactor(SPREADING_FACTOR) == RADIOLIB_ERR_INVALID_SPREADING_FACTOR) {
+    Serial.println(F("Selected spreading factor is invalid for this module!"));
+    while (true);
+  }
+
+  // Coding rate.
+  if (radio.setCodingRate(CODING_RATE) == RADIOLIB_ERR_INVALID_CODING_RATE) {
+    Serial.println(F("Selected coding rate is invalid for this module!"));
+    while (true);
   }
 
   // set the function that will be called
